@@ -721,6 +721,84 @@ void putSpinorSOA_eo(__global hmc_complex * const restrict out, const uint idx, 
 //"local" dslash working on a particular link (n,t) of an eoprec field
 //NOTE: each component is multiplied by +KAPPA, so the resulting spinor has to be mutliplied by -1 to obtain the correct dslash!!!
 //the difference to the "normal" dslash is that the coordinates of the neighbors have to be transformed into an eoprec index
+
+spinor inline dslash_eoprec_local(__global const hmc_complex * const restrict in, __global hmc_complex  const * const restrict field, const st_idx idx_arg, const dir_idx dir)
+{
+	//this is used to save the idx of the neighbors
+	st_idx idx_tmp;
+
+	spinor out_tmp, plus;
+	site_idx nn_eo;
+	su3vec psi, phi;
+	Matrixsu3 U;
+	//this is used to save the BC-conditions...
+	hmc_complex bc_tmp;
+	out_tmp = set_spinor_zero();
+
+	//CP: all actions correspond to the mu = 0 ones
+
+	///////////////////////////////////
+	// mu = +1
+	idx_tmp = get_neighbor_from_st_idx(idx_arg, dir);
+	//transform normal indices to eoprec index
+	nn_eo = get_eo_site_idx_from_st_idx(idx_tmp);
+	plus = getSpinorSOA_eo(in, nn_eo);
+	U = getSU3SOA(field, get_link_idx_SOA(dir, idx_arg));
+	bc_tmp.re = KAPPA_SPATIAL_RE;
+	bc_tmp.im = KAPPA_SPATIAL_IM;
+	/////////////////////////////////
+	//Calculate (1 - gamma_1) y
+	//with 1 - gamma_1:
+	//| 1  0  0  i |       |       psi.e0 + i*psi.e3  |
+	//| 0  1  i  0 | psi = |       psi.e1 + i*psi.e2  |
+	//| 0  i  1  0 |       |(-i)*( psi.e1 + i*psi.e2) |
+	//| i  0  0  1 |       |(-i)*( psi.e0 + i*psi.e3) |
+	/////////////////////////////////
+	psi = su3vec_acc_i(plus.e0, plus.e3);
+	phi = su3matrix_times_su3vec(U, psi);
+	psi = su3vec_times_complex(phi, bc_tmp);
+	out_tmp.e0 = su3vec_acc(out_tmp.e0, psi);
+	out_tmp.e3 = su3vec_dim_i(out_tmp.e3, psi);
+
+	psi = su3vec_acc_i(plus.e1, plus.e2);
+	phi = su3matrix_times_su3vec(U, psi);
+	psi = su3vec_times_complex(phi, bc_tmp);
+	out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
+	out_tmp.e2 = su3vec_dim_i(out_tmp.e2, psi);
+
+	///////////////////////////////////
+	//mu = -1
+	idx_tmp = get_lower_neighbor_from_st_idx(idx_arg, dir);
+	//transform normal indices to eoprec index
+	nn_eo = get_eo_site_idx_from_st_idx(idx_tmp);
+	plus = getSpinorSOA_eo(in, nn_eo);
+	U = getSU3SOA(field, get_link_idx_SOA(dir, idx_tmp));
+	//in direction -mu, one has to take the complex-conjugated value of bc_tmp. this is done right here.
+	bc_tmp.re = KAPPA_SPATIAL_RE;
+	bc_tmp.im = MKAPPA_SPATIAL_IM;
+	///////////////////////////////////
+	// Calculate (1 + gamma_1) y
+	// with 1 + gamma_1:
+	// | 1  0  0 -i |       |       psi.e0 - i*psi.e3  |
+	// | 0  1 -i  0 | psi = |       psi.e1 - i*psi.e2  |
+	// | 0  i  1  0 |       |(-i)*( psi.e1 - i*psi.e2) |
+	// | i  0  0  1 |       |(-i)*( psi.e0 - i*psi.e3) |
+	///////////////////////////////////
+	psi = su3vec_dim_i(plus.e0, plus.e3);
+	phi = su3matrix_dagger_times_su3vec(U, psi);
+	psi = su3vec_times_complex(phi, bc_tmp);
+	out_tmp.e0 = su3vec_acc(out_tmp.e0, psi);
+	out_tmp.e3 = su3vec_acc_i(out_tmp.e3, psi);
+
+	psi = su3vec_dim_i(plus.e1, plus.e2);
+	phi = su3matrix_dagger_times_su3vec(U, psi);
+	psi = su3vec_times_complex(phi, bc_tmp);
+	out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
+	out_tmp.e2 = su3vec_acc_i(out_tmp.e2, psi);
+
+	return out_tmp;
+}
+
 spinor inline dslash_eoprec_local_0(__global const hmc_complex * const restrict in, __global hmc_complex const * const restrict field, const st_idx idx_arg)
 {
 	spinor out_tmp, plus;
@@ -1071,6 +1149,54 @@ spinor inline dslash_eoprec_local_3(__global const hmc_complex * const restrict 
 	return out_tmp;
 }
 
+__kernel void dslash_eoprec_simplified_loop(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		#pragma unroll 1
+		for(int dir = 0; dir < NDIM; ++dir) {
+			out_tmp2 = dslash_eoprec_local(in, field, pos, dir);
+			out_tmp = spinor_dim(out_tmp, out_tmp2);
+		}
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_simplified(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		out_tmp2 = dslash_eoprec_local(in, field, pos, TDIR);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local(in, field, pos, XDIR);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local(in, field, pos, YDIR);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local(in, field, pos, ZDIR);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
 
 
 __kernel void dslash_eoprec(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
