@@ -1071,6 +1071,8 @@ spinor inline dslash_eoprec_local_3(__global const hmc_complex * const restrict 
 	return out_tmp;
 }
 
+
+
 __kernel void dslash_eoprec(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
 {
 	int global_size = get_global_size(0);
@@ -1086,6 +1088,72 @@ __kernel void dslash_eoprec(__global const hmc_complex * const restrict in, __gl
 
 		out_tmp2 = dslash_eoprec_local_0(in, field, pos);
 		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_2(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_3(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_1dir(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_2dirs(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_2(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_3dirs(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
 		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
 		out_tmp = spinor_dim(out_tmp, out_tmp2);
 		out_tmp2 = dslash_eoprec_local_2(in, field, pos);
