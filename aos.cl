@@ -72,6 +72,42 @@ typedef struct {
 
 __constant hmc_complex hmc_complex_zero = {0., 0.};
 
+/** @file
+ * Device code for lattice geometry handling
+ * Geometric conventions used should only be applied in this file
+ * All external functions should only use functions herein!!!
+ */
+
+////////////////////////////////////////////////////////////////
+// General Definitions
+////////////////////////////////////////////////////////////////
+
+/** In the following, identify (coord being coord_full or coord_spatial):
+ *coord.x == x
+ *coord.y == y
+ *coord.z == z
+ *(coord.w == t)
+ * NOTE: This does not necessarily reflect the geometric conventions used!
+ */
+
+/** @file
+ * Device code for lattice geometry handling
+ * Geometric conventions used should only be applied in this file
+ * All external functions should only use functions herein!!!
+ */
+
+////////////////////////////////////////////////////////////////
+// General Definitions
+////////////////////////////////////////////////////////////////
+
+/** In the following, identify (coord being coord_full or coord_spatial):
+ *coord.x == x
+ *coord.y == y
+ *coord.z == z
+ *(coord.w == t)
+ * NOTE: This does not necessarily reflect the geometric conventions used!
+ */
+
 /** index type to store all spacetime coordinates  */
 typedef uint4 coord_full;
 
@@ -471,6 +507,11 @@ st_idx get_lower_neighbor_from_st_idx(const st_idx in, const dir_idx dir)
 	return tmp;
 }
 
+// END OF GEOMETRY
+
+// OPERATIONS ON CUSTOM DATA TYPES
+
+
 su3vec set_su3vec_zero()
 {
 	su3vec tmp;
@@ -602,6 +643,9 @@ spinor spinor_dim(spinor in1, spinor in2)
 	tmp.e3 = su3vec_dim(in1.e3, in2.e3);
 	return tmp;
 }
+
+// END OF OPERATIONS ON CUSTOM DATA TYPES
+
 
 spinor get_spinor_from_eoprec_field(__global const spinor * const restrict in, const int n_eoprec)
 {
@@ -1009,6 +1053,72 @@ __kernel void dslash_eoprec(__global const spinor * const restrict in, __global 
 
 		out_tmp2 = dslash_eoprec_local_0(in, field, pos);
 		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_2(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_3(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+
+		put_spinor_to_eoprec_field(out_tmp, out, id_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_1dir(__global const spinor * const restrict in, __global spinor * const restrict out, __global const Matrixsu3 * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+
+		put_spinor_to_eoprec_field(out_tmp, out, id_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_2dirs(__global const spinor * const restrict in, __global spinor * const restrict out, __global const Matrixsu3 * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_2(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+
+		put_spinor_to_eoprec_field(out_tmp, out, id_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_3dirs(__global const spinor * const restrict in, __global spinor * const restrict out, __global const Matrixsu3 * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
 		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
 		out_tmp = spinor_dim(out_tmp, out_tmp2);
 		out_tmp2 = dslash_eoprec_local_2(in, field, pos);
