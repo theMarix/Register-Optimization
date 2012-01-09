@@ -207,11 +207,11 @@ coord_spatial get_coord_spatial(const spatial_idx nspace)
  * <=>t = site_idx / VOLSPACE
  * site_idx_spatial = site_idx%VOLSPACE
  */
-site_idx inline get_site_idx(const st_idx in)
+site_idx get_site_idx(const st_idx in)
 {
 	return in.space + VOLSPACE * in.time;
 }
-st_idx inline get_st_idx_from_site_idx(const site_idx in)
+st_idx get_st_idx_from_site_idx(const site_idx in)
 {
 	st_idx tmp;
 	tmp.space = in % VOLSPACE;
@@ -222,7 +222,7 @@ st_idx inline get_st_idx_from_site_idx(const site_idx in)
 /** returns eo-vector component from st_idx */
 site_idx get_eo_site_idx_from_st_idx(st_idx in);
 
-site_idx inline get_link_idx_SOA(const dir_idx mu, const st_idx in)
+site_idx get_link_idx_SOA(const dir_idx mu, const st_idx in)
 {
 	const uint3 space = get_coord_spatial(in.space);
 	// check if the site is odd (either spacepos or t odd)
@@ -237,11 +237,11 @@ site_idx inline get_link_idx_SOA(const dir_idx mu, const st_idx in)
  *using the convention:
  *link_idx = mu + NDIM * site_idx
  */
-link_idx inline get_link_idx(const dir_idx mu, const st_idx in)
+link_idx get_link_idx(const dir_idx mu, const st_idx in)
 {
 	return mu + NDIM * get_site_idx(in);
 }
-st_idx inline get_st_idx_from_link_idx(const link_idx in)
+st_idx get_st_idx_from_link_idx(const link_idx in)
 {
 	st_idx tmp;
 	site_idx idx_tmp = in / NDIM;
@@ -722,7 +722,7 @@ void putSpinorSOA_eo(__global hmc_complex * const restrict out, const uint idx, 
 //NOTE: each component is multiplied by +KAPPA, so the resulting spinor has to be mutliplied by -1 to obtain the correct dslash!!!
 //the difference to the "normal" dslash is that the coordinates of the neighbors have to be transformed into an eoprec index
 
-spinor inline dslash_eoprec_local(__global const hmc_complex * const restrict in, __global hmc_complex  const * const restrict field, const st_idx idx_arg, const dir_idx dir)
+spinor dslash_eoprec_local(__global const hmc_complex * const restrict in, __global hmc_complex  const * const restrict field, const st_idx idx_arg, const dir_idx dir)
 {
 	//this is used to save the idx of the neighbors
 	st_idx idx_tmp;
@@ -873,7 +873,7 @@ void dslash_eoprec_local_noret(spinor * inout, __global const hmc_complex * cons
 	inout->e2 = su3vec_dim_i(inout->e2, psi);
 }
 
-spinor inline dslash_eoprec_local_0(__global const hmc_complex * const restrict in, __global hmc_complex const * const restrict field, const st_idx idx_arg)
+spinor dslash_eoprec_local_0(__global const hmc_complex * const restrict in, __global hmc_complex const * const restrict field, const st_idx idx_arg)
 {
 	spinor out_tmp, plus;
 	//this is used to save the idx of the neighbors
@@ -979,7 +979,7 @@ spinor inline dslash_eoprec_local_0(__global const hmc_complex * const restrict 
 	return out_tmp;
 }
 
-spinor inline dslash_eoprec_local_1(__global const hmc_complex * const restrict in, __global hmc_complex  const * const restrict field, const st_idx idx_arg)
+spinor dslash_eoprec_local_1(__global const hmc_complex * const restrict in, __global hmc_complex  const * const restrict field, const st_idx idx_arg)
 {
 	//this is used to save the idx of the neighbors
 	st_idx idx_tmp;
@@ -1061,7 +1061,7 @@ spinor inline dslash_eoprec_local_1(__global const hmc_complex * const restrict 
 	return out_tmp;
 }
 
-spinor inline dslash_eoprec_local_2(__global const hmc_complex * const restrict in, __global hmc_complex const * const restrict field, const st_idx idx_arg)
+spinor dslash_eoprec_local_2(__global const hmc_complex * const restrict in, __global hmc_complex const * const restrict field, const st_idx idx_arg)
 {
 	//this is used to save the idx of the neighbors
 	st_idx idx_tmp;
@@ -1142,7 +1142,7 @@ spinor inline dslash_eoprec_local_2(__global const hmc_complex * const restrict 
 	return out_tmp;
 }
 
-spinor inline dslash_eoprec_local_3(__global const hmc_complex * const restrict in, __global hmc_complex const * const restrict field, const st_idx idx_arg)
+spinor dslash_eoprec_local_3(__global const hmc_complex * const restrict in, __global hmc_complex const * const restrict field, const st_idx idx_arg)
 {
 	//this is used to save the idx of the neighbors
 	st_idx idx_tmp;
