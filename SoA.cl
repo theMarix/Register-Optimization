@@ -1,7 +1,59 @@
 /** @file
- * Everything required to measure register usage for
- * dslash kernels based on a traditional AOS memory storage format.
+ * This are various variations of a dslash kernel based on SOA storage.
+ *
+ * The file is rather lenghty because it contains multiple kernels and
+ * all things used by the kernels. The code of a single kernel is still
+ * long, but keeping the structure of the file in mind can "easily" be read.
+ *
+ * The structure of the file is as follows.
+ *  * General Definitions, e.g. defining problem dimenstions and array strides
+ *  * Data types representing physical values
+ *  * Data types used to address values (index types)
+ *  * Functions used for working with index types
+ *  * Functions implementing operations for the physical values
+ *  * Variations of the part of the kernel working in one direction
+ *  * Kernels
+ *
+ * Please not that the APP Kernel Analyzer (Dec 2011) gives strange readings
+ * for the resource usage of theses kernels. You can use
+ * https://github.com/theMarix/pyclKernelAnalyzer to get values corresponding
+ * to actual values observed in the application using theses kernels.
+ *
+ * Snapshot values for Catalyst 11.11 (APP 2.5) measures using
+ * pyclKernelAnalyzer/analyze.py -d 0 SoA.cl
+ *
+ * Kernel Name, GPRs Scratch Registers, Local Memory (Bytes), Device Version, Driver Version
+ * dslash_eoprec_simplified_loop_noret    52     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
+ * dslash_eoprec_simplified_loop          62     7    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
+ * dslash_eoprec_simplified               54     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
+ * dslash_eoprec                          62    12    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
+ * dslash_eoprec_1dir                     49     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
+ * dslash_eoprec_2dirs                    62     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
+ * dslash_eoprec_3dirs                    62    10    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
+ * dslash_eoprec_lim_group_size           71     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
+ *
+ * To give a briew overview what happening here. The kernel operations on a four-dimensional lattice. Each site
+ * of the lattice is an element of type spinor. These sites are linked with their nearest neighbours via elements
+ * of type Matrixsu3. The whole problem is red-black conditioned. So the input contains only black, the output only
+ * red elements or vice versa. In this code we call this even-odd.
+ *
+ * On run of the kernel calculates a new set of spinors. Each site is basically calculated by summing up the
+ * nearest neighbours in all four directions (time, x, y, z) – which is 8 values (forward and backward) weighted by
+ * the linking Matrixsu3 element. There is some additional foo based on the direction, which is why we actually
+ * need an own function for each direction: dslash_eoprec_local0/1/2/3. For comparison there is also are also kernels
+ * which, physically incorrectly, perform the same calculation regardless of direction (it's basically the x-direction function):
+ * dslash_eoprec_local. This is used by the simplified kernels.
+ *
+ * Looking at the resource utilization above two points stick out:
+ *  1. The dslash_eoprec_3dirs kernel uses 10 scratch registers where the dslash_eoprec_2dirs kernel uses none.
+ *  2. dslash_eoprec_simplified_loop uses more registers than dslash_eoprec_simpliefied, where the later is simply
+ *     the manually unrolled version. Optimizing away the return value by hand again reduces register usage.
+ *     The latter is somewhat surprising, as in many cases I have seen register uses explode by adding pointers to registers.
  */
+
+//
+// General Definitions, e.g. defining problem dimenstions and array strides
+//
 
 #ifdef cl_khr_fp
 #pragma OPENCL EXTENSION cl_khr_fp64 : enable
@@ -35,6 +87,10 @@
 
 #define EVEN 0
 #define ODD 1
+
+//
+// Data types representing physical values
+//
 
 typedef double hmc_float __attribute__((aligned(8)));
 
@@ -73,6 +129,10 @@ typedef struct {
 } Matrixsu3;
 
 __constant hmc_complex hmc_complex_zero = {0., 0.};
+
+//
+// Data types used to address values (index types)
+//
 
 /** @file
  * Device code for lattice geometry handling
@@ -126,6 +186,10 @@ typedef struct {
 #define XDIR 1
 #define YDIR 2
 #define ZDIR 3
+
+//
+// Functions used for working with index types
+//
 
 /**
  * The following conventions are used:
@@ -505,6 +569,9 @@ st_idx get_lower_neighbor_from_st_idx(const st_idx in, const dir_idx dir)
 
 // OPERATIONS ON CUSTOM DATA TYPES
 
+//
+//Functions implementing operations for the physical values
+//
 
 su3vec set_su3vec_zero()
 {
@@ -717,6 +784,10 @@ void putSpinorSOA_eo(__global hmc_complex * const restrict out, const uint idx, 
 /**
  @file fermionmatrix-functions for eoprec spinorfields
 */
+
+//
+// Variations of the part of the kernel working in one direction
+//
 
 //"local" dslash working on a particular link (n,t) of an eoprec field
 //NOTE: each component is multiplied by +KAPPA, so the resulting spinor has to be mutliplied by -1 to obtain the correct dslash!!!
@@ -1222,6 +1293,10 @@ spinor dslash_eoprec_local_3(__global const hmc_complex * const restrict in, __g
 
 	return out_tmp;
 }
+
+//
+// Kernels
+//
 
 __kernel void dslash_eoprec_simplified_loop_noret(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
 {
