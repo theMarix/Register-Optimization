@@ -1606,16 +1606,6 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 	nn_eo = get_eo_site_idx_from_st_idx(idx_tmp);
 	plus = getSpinorSOA_eo(in, nn_eo);
 	U = getSU3SOA(field, get_link_idx_SOA(dir, idx_arg));
-	if(dir == TDIR) {
-		//if chemical potential is activated, U has to be multiplied by appropiate factor
-		#ifdef _CP_REAL_
-			U = multiply_matrixsu3_by_real (U, EXPCPR);
-		#endif
-		#ifdef _CP_IMAG_
-			hmc_complex cpi_tmp = {COSCPI, SINCPI};
-			U = multiply_matrixsu3_by_complex (U, cpi_tmp );
-		#endif
-	}
 	bc_tmp.re = KAPPA_SPATIAL_RE;
 	bc_tmp.im = KAPPA_SPATIAL_IM;
 	if(dir == XDIR) {
@@ -1679,6 +1669,14 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e3 = su3vec_acc_i(out_tmp.e3, psi);
 	} else { // TDIR
+		//if chemical potential is activated, U has to be multiplied by appropiate factor
+		#ifdef _CP_REAL_
+			U = multiply_matrixsu3_by_real (U, EXPCPR);
+		#endif
+		#ifdef _CP_IMAG_
+			hmc_complex cpi_tmp = {COSCPI, SINCPI};
+			U = multiply_matrixsu3_by_complex (U, cpi_tmp );
+		#endif
 		///////////////////////////////////
 		// Calculate psi/phi = (1 - gamma_0) plus/y
 		// with 1 - gamma_0:
@@ -1776,6 +1774,18 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e3 = su3vec_dim_i(out_tmp.e3, psi);
 	} else { // TDIR
+		//if chemical potential is activated, U has to be multiplied by appropiate factor
+		//this is the same as at mu=0 in the imag. case, since U is taken to be U^+ later:
+		//  (exp(iq)U)^+ = exp(-iq)U^+
+		//as it should be
+		//in the real case, one has to take exp(q) -> exp(-q)
+		#ifdef _CP_REAL_
+			U = multiply_matrixsu3_by_real (U, MEXPCPR);
+		#endif
+		#ifdef _CP_IMAG_
+			hmc_complex cpi_tmp = {COSCPI, SINCPI};
+			U = multiply_matrixsu3_by_complex (U, cpi_tmp );
+		#endif
 		///////////////////////////////////
 		// Calculate psi/phi = (1 + gamma_0) y
 		// with 1 + gamma_0:
