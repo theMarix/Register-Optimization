@@ -1,5 +1,6 @@
 /** @file
  * This are various variations of a dslash kernel based on SOA storage.
+ * The main kernel of which the other are variants is dslash_eoprec.
  *
  * The file is rather lenghty because it contains multiple kernels and
  * all things used by the kernels. The code of a single kernel is still
@@ -23,14 +24,16 @@
  * pyclKernelAnalyzer/analyze.py -d 0 SoA.cl
  *
  * Kernel Name, GPRs Scratch Registers, Local Memory (Bytes), Device Version, Driver Version
- * dslash_eoprec_simplified_loop_noret    52     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
- * dslash_eoprec_simplified_loop          62     7    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
- * dslash_eoprec_simplified               54     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
- * dslash_eoprec                          62    12    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
- * dslash_eoprec_1dir                     49     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
- * dslash_eoprec_2dirs                    62     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
- * dslash_eoprec_3dirs                    62    10    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
- * dslash_eoprec_lim_group_size           71     0    0    OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)    CAL 1.4.1607
+ * slash_eoprec_1dir                       49       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * dslash_eoprec_2dirs                     62       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * dslash_eoprec_3dirs                     62      10       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * dslash_eoprec                           62      12       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * dslash_eoprec_lim_group_size            71       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * dslash_eoprec_simplified                54       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * dslash_eoprec_simplified_loop           62       7       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * dslash_eoprec_simplified_loop_unrolled  54       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * dslash_eoprec_simplified_loop_nounroll  62       7       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * dslash_eoprec_simplified_loop_noret     52       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
  *
  * To give a briew overview what happening here. The kernel operations on a four-dimensional lattice. Each site
  * of the lattice is an element of type spinor. These sites are linked with their nearest neighbours via elements
@@ -38,7 +41,7 @@
  * red elements or vice versa. In this code we call this even-odd.
  *
  * On run of the kernel calculates a new set of spinors. Each site is basically calculated by summing up the
- * nearest neighbours in all four directions (time, x, y, z) – which is 8 values (forward and backward) weighted by
+ * nearest neighbours in all four directions (time, x, y, z) - which is 8 values (forward and backward) weighted by
  * the linking Matrixsu3 element. There is some additional foo based on the direction, which is why we actually
  * need an own function for each direction: dslash_eoprec_local0/1/2/3. For comparison there is also are also kernels
  * which, physically incorrectly, perform the same calculation regardless of direction (it's basically the x-direction function):
@@ -46,9 +49,11 @@
  *
  * Looking at the resource utilization above two points stick out:
  *  1. The dslash_eoprec_3dirs kernel uses 10 scratch registers where the dslash_eoprec_2dirs kernel uses none.
- *  2. dslash_eoprec_simplified_loop uses more registers than dslash_eoprec_simpliefied, where the later is simply
- *     the manually unrolled version. Optimizing away the return value by hand again reduces register usage.
- *     The latter is somewhat surprising, as in many cases I have seen register uses explode by adding pointers to registers.
+ *  2. In the simplified case unrolled loops use less registers than non-unrolled. With the notable exception of the non-unrolled
+ *     version where the return value was optimized out by using a pointer. This is especially strange, as pointers to registers
+ *     often make the register count explode.
+ *     The reason it wonders me the the register optimization is better in the unrolled case is, that in that case the simplification
+ *     should not produce any other code than the original version. With the exception of some additions being subtractions or vice versa.
  */
 
 //
@@ -1298,103 +1303,6 @@ spinor dslash_eoprec_local_3(__global const hmc_complex * const restrict in, __g
 // Kernels
 //
 
-__kernel void dslash_eoprec_simplified_loop_noret(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
-{
-	int global_size = get_global_size(0);
-	int id = get_global_id(0);
-
-	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
-		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
-
-		spinor out_tmp = set_spinor_zero();
-
-		//calc dslash (this includes mutliplication with kappa)
-
-		#pragma unroll 1
-		for(int dir = 0; dir < NDIM; ++dir) {
-			dslash_eoprec_local_noret(&out_tmp, in, field, pos, dir);
-		}
-
-		putSpinorSOA_eo(out, id_tmp, out_tmp);
-	}
-}
-
-
-__kernel void dslash_eoprec_simplified_loop(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
-{
-	int global_size = get_global_size(0);
-	int id = get_global_id(0);
-
-	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
-		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
-
-		spinor out_tmp = set_spinor_zero();
-		spinor out_tmp2;
-
-		//calc dslash (this includes mutliplication with kappa)
-
-		#pragma unroll 1
-		for(int dir = 0; dir < NDIM; ++dir) {
-			out_tmp2 = dslash_eoprec_local(in, field, pos, dir);
-			out_tmp = spinor_dim(out_tmp, out_tmp2);
-		}
-
-		putSpinorSOA_eo(out, id_tmp, out_tmp);
-	}
-}
-
-__kernel void dslash_eoprec_simplified(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
-{
-	int global_size = get_global_size(0);
-	int id = get_global_id(0);
-
-	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
-		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
-
-		spinor out_tmp = set_spinor_zero();
-		spinor out_tmp2;
-
-		//calc dslash (this includes mutliplication with kappa)
-
-		out_tmp2 = dslash_eoprec_local(in, field, pos, TDIR);
-		out_tmp = spinor_dim(out_tmp, out_tmp2);
-		out_tmp2 = dslash_eoprec_local(in, field, pos, XDIR);
-		out_tmp = spinor_dim(out_tmp, out_tmp2);
-		out_tmp2 = dslash_eoprec_local(in, field, pos, YDIR);
-		out_tmp = spinor_dim(out_tmp, out_tmp2);
-		out_tmp2 = dslash_eoprec_local(in, field, pos, ZDIR);
-		out_tmp = spinor_dim(out_tmp, out_tmp2);
-
-		putSpinorSOA_eo(out, id_tmp, out_tmp);
-	}
-}
-
-
-__kernel void dslash_eoprec(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
-{
-	int global_size = get_global_size(0);
-	int id = get_global_id(0);
-
-	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
-		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
-
-		spinor out_tmp = set_spinor_zero();
-		spinor out_tmp2;
-
-		//calc dslash (this includes mutliplication with kappa)
-
-		out_tmp2 = dslash_eoprec_local_0(in, field, pos);
-		out_tmp = spinor_dim(out_tmp, out_tmp2);
-		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
-		out_tmp = spinor_dim(out_tmp, out_tmp2);
-		out_tmp2 = dslash_eoprec_local_2(in, field, pos);
-		out_tmp = spinor_dim(out_tmp, out_tmp2);
-		out_tmp2 = dslash_eoprec_local_3(in, field, pos);
-		out_tmp = spinor_dim(out_tmp, out_tmp2);
-
-		putSpinorSOA_eo(out, id_tmp, out_tmp);
-	}
-}
 
 __kernel void dslash_eoprec_1dir(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
 {
@@ -1462,6 +1370,32 @@ __kernel void dslash_eoprec_3dirs(__global const hmc_complex * const restrict in
 	}
 }
 
+__kernel void dslash_eoprec(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		out_tmp2 = dslash_eoprec_local_0(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_1(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_2(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local_3(in, field, pos);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
 __attribute__((reqd_work_group_size(128, 1, 1)))
 __kernel void dslash_eoprec_lim_group_size(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
 {
@@ -1488,3 +1422,119 @@ __kernel void dslash_eoprec_lim_group_size(__global const hmc_complex * const re
 		putSpinorSOA_eo(out, id_tmp, out_tmp);
 	}
 }
+
+__kernel void dslash_eoprec_simplified(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		out_tmp2 = dslash_eoprec_local(in, field, pos, TDIR);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local(in, field, pos, XDIR);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local(in, field, pos, YDIR);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+		out_tmp2 = dslash_eoprec_local(in, field, pos, ZDIR);
+		out_tmp = spinor_dim(out_tmp, out_tmp2);
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_simplified_loop(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		for(int dir = 0; dir < NDIM; ++dir) {
+			out_tmp2 = dslash_eoprec_local(in, field, pos, dir);
+			out_tmp = spinor_dim(out_tmp, out_tmp2);
+		}
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_simplified_loop_unrolled(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		#pragma unroll NDIM
+		for(int dir = 0; dir < NDIM; ++dir) {
+			out_tmp2 = dslash_eoprec_local(in, field, pos, dir);
+			out_tmp = spinor_dim(out_tmp, out_tmp2);
+		}
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_simplified_loop_nounroll(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+		spinor out_tmp2;
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		#pragma unroll 1
+		for(int dir = 0; dir < NDIM; ++dir) {
+			out_tmp2 = dslash_eoprec_local(in, field, pos, dir);
+			out_tmp = spinor_dim(out_tmp, out_tmp2);
+		}
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
+__kernel void dslash_eoprec_simplified_loop_noret(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
+{
+	int global_size = get_global_size(0);
+	int id = get_global_id(0);
+
+	for(int id_tmp = id; id_tmp < EOPREC_SPINORFIELDSIZE; id_tmp += global_size) {
+		st_idx pos = (evenodd == ODD) ? get_even_st_idx(id_tmp) : get_odd_st_idx(id_tmp);
+
+		spinor out_tmp = set_spinor_zero();
+
+		//calc dslash (this includes mutliplication with kappa)
+
+		#pragma unroll 1
+		for(int dir = 0; dir < NDIM; ++dir) {
+			dslash_eoprec_local_noret(&out_tmp, in, field, pos, dir);
+		}
+
+		putSpinorSOA_eo(out, id_tmp, out_tmp);
+	}
+}
+
