@@ -23,17 +23,21 @@
  * Snapshot values for Catalyst 11.11 (APP 2.5) measures using
  * pyclKernelAnalyzer/analyze.py -d 0 SoA.cl
  *
- * Kernel Name, GPRs Scratch Registers, Local Memory (Bytes), Device Version, Driver Version
- * slash_eoprec_1dir                       49       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
- * dslash_eoprec_2dirs                     62       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
- * dslash_eoprec_3dirs                     62      10       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
- * dslash_eoprec                           62      12       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
- * dslash_eoprec_lim_group_size            71       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
- * dslash_eoprec_simplified                54       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
- * dslash_eoprec_simplified_loop           62       7       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
- * dslash_eoprec_simplified_loop_unrolled  54       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
- * dslash_eoprec_simplified_loop_nounroll  62       7       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
- * dslash_eoprec_simplified_loop_noret     52       0       0       OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)     CAL 1.4.1607
+ * Kernel Name                              GPRs   Scratch Registers   Local Memory (Bytes)   Version                               Driver Version
+ * -----------------------------------------------------------------------------------------------------------------------------------------------
+ * dslash_eoprec_1dir                         49                   0                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_2dirs                        62                   0                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_3dirs                        62                  10                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec                              62                  12                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_lim_group_size               71                   0                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_simplified                   54                   0                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_simplified_loop              62                   7                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_simplified_loop_unrolled     54                   0                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_simplified_loop_nounroll     62                   7                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_simplified_loop_noret        52                   0                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_unified_2dirs                50                   0                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_unified_3dirs                55                   0                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
+ * dslash_eoprec_unified                      54                   0                      0   OpenCL 1.1 AMD-APP-SDK-v2.5 (793.1)   CAL 1.4.1607
  *
  * To give a briew overview what happening here. The kernel operations on a four-dimensional lattice. Each site
  * of the lattice is an element of type spinor. These sites are linked with their nearest neighbours via elements
@@ -47,6 +51,9 @@
  * which, physically incorrectly, perform the same calculation regardless of direction (it's basically the x-direction function):
  * dslash_eoprec_local. This is used by the simplified kernels.
  *
+ * The unified kernels are a varient of the simplified kernel, however internally they have conditional branches ensuring correct
+ * calculation for each direction. Because of this after code generation they should actually produce the same code as the non-simplified kernels.
+ *
  * Looking at the resource utilization above two points stick out:
  *  1. The dslash_eoprec_3dirs kernel uses 10 scratch registers where the dslash_eoprec_2dirs kernel uses none.
  *  2. In the simplified case unrolled loops use less registers than non-unrolled. With the notable exception of the non-unrolled
@@ -54,6 +61,8 @@
  *     often make the register count explode.
  *     The reason it wonders me the the register optimization is better in the unrolled case is, that in that case the simplification
  *     should not produce any other code than the original version. With the exception of some additions being subtractions or vice versa.
+ *  3. Registerwise the unified kernels behave like the simplified kernels. However the sequence of operations should be exactly the same
+ *     as for the regular kernels. Assuming correctness of these kernels the regular kernels should not require more registers.
  */
 
 //
@@ -1321,15 +1330,15 @@ spinor dslash_eoprec_unified_12(__global const hmc_complex * const restrict in, 
 	U = getSU3SOA(field, get_link_idx_SOA(dir, idx_arg));
 	bc_tmp.re = KAPPA_SPATIAL_RE;
 	bc_tmp.im = KAPPA_SPATIAL_IM;
-	/////////////////////////////////
-	//Calculate (1 - gamma_1) y
-	//with 1 - gamma_1:
-	//| 1  0  0  i |       |       psi.e0 + i*psi.e3  |
-	//| 0  1  i  0 | psi = |       psi.e1 + i*psi.e2  |
-	//| 0  i  1  0 |       |(-i)*( psi.e1 + i*psi.e2) |
-	//| i  0  0  1 |       |(-i)*( psi.e0 + i*psi.e3) |
-	/////////////////////////////////
 	if(dir == XDIR) {
+		/////////////////////////////////
+		//Calculate (1 - gamma_1) y
+		//with 1 - gamma_1:
+		//| 1  0  0  i |       |       psi.e0 + i*psi.e3  |
+		//| 0  1  i  0 | psi = |       psi.e1 + i*psi.e2  |
+		//| 0  i  1  0 |       |(-i)*( psi.e1 + i*psi.e2) |
+		//| i  0  0  1 |       |(-i)*( psi.e0 + i*psi.e3) |
+		/////////////////////////////////
 		psi = su3vec_acc_i(plus.e0, plus.e3);
 		phi = su3matrix_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1341,7 +1350,15 @@ spinor dslash_eoprec_unified_12(__global const hmc_complex * const restrict in, 
 		psi = su3vec_times_complex(phi, bc_tmp);
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_dim_i(out_tmp.e2, psi);
-	} else {
+	} else { // YDIR
+		///////////////////////////////////
+		// Calculate (1 - gamma_2) y
+		// with 1 - gamma_2:
+		// | 1  0  0  1 |       |       psi.e0 + psi.e3  |
+		// | 0  1 -1  0 | psi = |       psi.e1 - psi.e2  |
+		// | 0 -1  1  0 |       |(-1)*( psi.e1 + psi.e2) |
+		// | 1  0  0  1 |       |     ( psi.e0 + psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_acc(plus.e0, plus.e3);
 		phi = su3matrix_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1365,15 +1382,15 @@ spinor dslash_eoprec_unified_12(__global const hmc_complex * const restrict in, 
 	//in direction -mu, one has to take the complex-conjugated value of bc_tmp. this is done right here.
 	bc_tmp.re = KAPPA_SPATIAL_RE;
 	bc_tmp.im = MKAPPA_SPATIAL_IM;
-	///////////////////////////////////
-	// Calculate (1 + gamma_1) y
-	// with 1 + gamma_1:
-	// | 1  0  0 -i |       |       psi.e0 - i*psi.e3  |
-	// | 0  1 -i  0 | psi = |       psi.e1 - i*psi.e2  |
-	// | 0  i  1  0 |       |(-i)*( psi.e1 - i*psi.e2) |
-	// | i  0  0  1 |       |(-i)*( psi.e0 - i*psi.e3) |
-	///////////////////////////////////
 	if(dir == XDIR) {
+		///////////////////////////////////
+		// Calculate (1 + gamma_1) y
+		// with 1 + gamma_1:
+		// | 1  0  0 -i |       |       psi.e0 - i*psi.e3  |
+		// | 0  1 -i  0 | psi = |       psi.e1 - i*psi.e2  |
+		// | 0  i  1  0 |       |(-i)*( psi.e1 - i*psi.e2) |
+		// | i  0  0  1 |       |(-i)*( psi.e0 - i*psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_dim_i(plus.e0, plus.e3);
 		phi = su3matrix_dagger_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1385,7 +1402,15 @@ spinor dslash_eoprec_unified_12(__global const hmc_complex * const restrict in, 
 		psi = su3vec_times_complex(phi, bc_tmp);
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_acc_i(out_tmp.e2, psi);
-	} else {
+	} else { // YDIR
+		///////////////////////////////////
+		// Calculate (1 + gamma_2) y
+		// with 1 + gamma_2:
+		// | 1  0  0 -1 |       |       psi.e0 - psi.e3  |
+		// | 0  1  1  0 | psi = |       psi.e1 + psi.e2  |
+		// | 0  1  1  0 |       |     ( psi.e1 + psi.e2) |
+		// |-1  0  0  1 |       |(-1)*( psi.e0 - psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_dim(plus.e0, plus.e3);
 		phi = su3matrix_dagger_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1424,15 +1449,15 @@ spinor dslash_eoprec_unified_123(__global const hmc_complex * const restrict in,
 	U = getSU3SOA(field, get_link_idx_SOA(dir, idx_arg));
 	bc_tmp.re = KAPPA_SPATIAL_RE;
 	bc_tmp.im = KAPPA_SPATIAL_IM;
-	/////////////////////////////////
-	//Calculate (1 - gamma_1) y
-	//with 1 - gamma_1:
-	//| 1  0  0  i |       |       psi.e0 + i*psi.e3  |
-	//| 0  1  i  0 | psi = |       psi.e1 + i*psi.e2  |
-	//| 0  i  1  0 |       |(-i)*( psi.e1 + i*psi.e2) |
-	//| i  0  0  1 |       |(-i)*( psi.e0 + i*psi.e3) |
-	/////////////////////////////////
 	if(dir == XDIR) {
+		/////////////////////////////////
+		//Calculate (1 - gamma_1) y
+		//with 1 - gamma_1:
+		//| 1  0  0  i |       |       psi.e0 + i*psi.e3  |
+		//| 0  1  i  0 | psi = |       psi.e1 + i*psi.e2  |
+		//| 0  i  1  0 |       |(-i)*( psi.e1 + i*psi.e2) |
+		//| i  0  0  1 |       |(-i)*( psi.e0 + i*psi.e3) |
+		/////////////////////////////////
 		psi = su3vec_acc_i(plus.e0, plus.e3);
 		phi = su3matrix_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1445,6 +1470,14 @@ spinor dslash_eoprec_unified_123(__global const hmc_complex * const restrict in,
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_dim_i(out_tmp.e2, psi);
 	} else if(dir == YDIR) {
+		///////////////////////////////////
+		// Calculate (1 - gamma_2) y
+		// with 1 - gamma_2:
+		// | 1  0  0  1 |       |       psi.e0 + psi.e3  |
+		// | 0  1 -1  0 | psi = |       psi.e1 - psi.e2  |
+		// | 0 -1  1  0 |       |(-1)*( psi.e1 + psi.e2) |
+		// | 1  0  0  1 |       |     ( psi.e0 + psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_acc(plus.e0, plus.e3);
 		phi = su3matrix_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1457,6 +1490,14 @@ spinor dslash_eoprec_unified_123(__global const hmc_complex * const restrict in,
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_dim(out_tmp.e2, psi);
 	} else { // ZDIR
+		///////////////////////////////////
+		// Calculate (1 - gamma_3) y
+		// with 1 - gamma_3:
+		// | 1  0  i  0 |        |       psi.e0 + i*psi.e2  |
+		// | 0  1  0 -i |  psi = |       psi.e1 - i*psi.e3  |
+		// |-i  0  1  0 |        |   i *(psi.e0 + i*psi.e2) |
+		// | 0  i  0  1 |        | (-i)*(psi.e1 - i*psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_acc_i(plus.e0, plus.e2);
 		phi = su3matrix_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1480,15 +1521,15 @@ spinor dslash_eoprec_unified_123(__global const hmc_complex * const restrict in,
 	//in direction -mu, one has to take the complex-conjugated value of bc_tmp. this is done right here.
 	bc_tmp.re = KAPPA_SPATIAL_RE;
 	bc_tmp.im = MKAPPA_SPATIAL_IM;
-	///////////////////////////////////
-	// Calculate (1 + gamma_1) y
-	// with 1 + gamma_1:
-	// | 1  0  0 -i |       |       psi.e0 - i*psi.e3  |
-	// | 0  1 -i  0 | psi = |       psi.e1 - i*psi.e2  |
-	// | 0  i  1  0 |       |(-i)*( psi.e1 - i*psi.e2) |
-	// | i  0  0  1 |       |(-i)*( psi.e0 - i*psi.e3) |
-	///////////////////////////////////
 	if(dir == XDIR) {
+		///////////////////////////////////
+		// Calculate (1 + gamma_1) y
+		// with 1 + gamma_1:
+		// | 1  0  0 -i |       |       psi.e0 - i*psi.e3  |
+		// | 0  1 -i  0 | psi = |       psi.e1 - i*psi.e2  |
+		// | 0  i  1  0 |       |(-i)*( psi.e1 - i*psi.e2) |
+		// | i  0  0  1 |       |(-i)*( psi.e0 - i*psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_dim_i(plus.e0, plus.e3);
 		phi = su3matrix_dagger_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1501,6 +1542,14 @@ spinor dslash_eoprec_unified_123(__global const hmc_complex * const restrict in,
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_acc_i(out_tmp.e2, psi);
 	} else if(dir == YDIR) {
+		///////////////////////////////////
+		// Calculate (1 + gamma_2) y
+		// with 1 + gamma_2:
+		// | 1  0  0 -1 |       |       psi.e0 - psi.e3  |
+		// | 0  1  1  0 | psi = |       psi.e1 + psi.e2  |
+		// | 0  1  1  0 |       |     ( psi.e1 + psi.e2) |
+		// |-1  0  0  1 |       |(-1)*( psi.e0 - psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_dim(plus.e0, plus.e3);
 		phi = su3matrix_dagger_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1513,6 +1562,14 @@ spinor dslash_eoprec_unified_123(__global const hmc_complex * const restrict in,
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_acc(out_tmp.e2, psi);
 	} else { // ZDIR
+		///////////////////////////////////
+		// Calculate (1 + gamma_3) y
+		// with 1 + gamma_3:
+		// | 1  0 -i  0 |       |       psi.e0 - i*psi.e2  |
+		// | 0  1  0  i | psi = |       psi.e1 + i*psi.e3  |
+		// | i  0  1  0 |       | (-i)*(psi.e0 - i*psi.e2) |
+		// | 0 -i  0  1 |       |   i *(psi.e1 + i*psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_dim_i(plus.e0, plus.e2);
 		phi = su3matrix_dagger_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1561,15 +1618,15 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 	}
 	bc_tmp.re = KAPPA_SPATIAL_RE;
 	bc_tmp.im = KAPPA_SPATIAL_IM;
-	/////////////////////////////////
-	//Calculate (1 - gamma_1) y
-	//with 1 - gamma_1:
-	//| 1  0  0  i |       |       psi.e0 + i*psi.e3  |
-	//| 0  1  i  0 | psi = |       psi.e1 + i*psi.e2  |
-	//| 0  i  1  0 |       |(-i)*( psi.e1 + i*psi.e2) |
-	//| i  0  0  1 |       |(-i)*( psi.e0 + i*psi.e3) |
-	/////////////////////////////////
 	if(dir == XDIR) {
+		/////////////////////////////////
+		//Calculate (1 - gamma_1) y
+		//with 1 - gamma_1:
+		//| 1  0  0  i |       |       psi.e0 + i*psi.e3  |
+		//| 0  1  i  0 | psi = |       psi.e1 + i*psi.e2  |
+		//| 0  i  1  0 |       |(-i)*( psi.e1 + i*psi.e2) |
+		//| i  0  0  1 |       |(-i)*( psi.e0 + i*psi.e3) |
+		/////////////////////////////////
 		psi = su3vec_acc_i(plus.e0, plus.e3);
 		phi = su3matrix_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1582,6 +1639,14 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_dim_i(out_tmp.e2, psi);
 	} else if(dir == YDIR) {
+		///////////////////////////////////
+		// Calculate (1 - gamma_2) y
+		// with 1 - gamma_2:
+		// | 1  0  0  1 |       |       psi.e0 + psi.e3  |
+		// | 0  1 -1  0 | psi = |       psi.e1 - psi.e2  |
+		// | 0 -1  1  0 |       |(-1)*( psi.e1 + psi.e2) |
+		// | 1  0  0  1 |       |     ( psi.e0 + psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_acc(plus.e0, plus.e3);
 		phi = su3matrix_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1594,6 +1659,14 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_dim(out_tmp.e2, psi);
 	} else if(dir == ZDIR) {
+		///////////////////////////////////
+		// Calculate (1 - gamma_3) y
+		// with 1 - gamma_3:
+		// | 1  0  i  0 |        |       psi.e0 + i*psi.e2  |
+		// | 0  1  0 -i |  psi = |       psi.e1 - i*psi.e3  |
+		// |-i  0  1  0 |        |   i *(psi.e0 + i*psi.e2) |
+		// | 0  i  0  1 |        | (-i)*(psi.e1 - i*psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_acc_i(plus.e0, plus.e2);
 		phi = su3matrix_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1606,6 +1679,14 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e3 = su3vec_acc_i(out_tmp.e3, psi);
 	} else { // TDIR
+		///////////////////////////////////
+		// Calculate psi/phi = (1 - gamma_0) plus/y
+		// with 1 - gamma_0:
+		// | 1  0  1  0 |        | psi.e0 + psi.e2 |
+		// | 0  1  0  1 |  psi = | psi.e1 + psi.e3 |
+		// | 1  0  1  0 |        | psi.e1 + psi.e3 |
+		// | 0  1  0  1 |        | psi.e0 + psi.e2 |
+		///////////////////////////////////
 		// psi = 0. component of (1-gamma_0)y
 		psi = su3vec_acc(plus.e0, plus.e2);
 		// phi = U*psi
@@ -1634,15 +1715,15 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 	//in direction -mu, one has to take the complex-conjugated value of bc_tmp. this is done right here.
 	bc_tmp.re = KAPPA_SPATIAL_RE;
 	bc_tmp.im = MKAPPA_SPATIAL_IM;
-	///////////////////////////////////
-	// Calculate (1 + gamma_1) y
-	// with 1 + gamma_1:
-	// | 1  0  0 -i |       |       psi.e0 - i*psi.e3  |
-	// | 0  1 -i  0 | psi = |       psi.e1 - i*psi.e2  |
-	// | 0  i  1  0 |       |(-i)*( psi.e1 - i*psi.e2) |
-	// | i  0  0  1 |       |(-i)*( psi.e0 - i*psi.e3) |
-	///////////////////////////////////
 	if(dir == XDIR) {
+		///////////////////////////////////
+		// Calculate (1 + gamma_1) y
+		// with 1 + gamma_1:
+		// | 1  0  0 -i |       |       psi.e0 - i*psi.e3  |
+		// | 0  1 -i  0 | psi = |       psi.e1 - i*psi.e2  |
+		// | 0  i  1  0 |       |(-i)*( psi.e1 - i*psi.e2) |
+		// | i  0  0  1 |       |(-i)*( psi.e0 - i*psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_dim_i(plus.e0, plus.e3);
 		phi = su3matrix_dagger_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1655,6 +1736,14 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_acc_i(out_tmp.e2, psi);
 	} else if(dir == YDIR) {
+		///////////////////////////////////
+		// Calculate (1 + gamma_2) y
+		// with 1 + gamma_2:
+		// | 1  0  0 -1 |       |       psi.e0 - psi.e3  |
+		// | 0  1  1  0 | psi = |       psi.e1 + psi.e2  |
+		// | 0  1  1  0 |       |     ( psi.e1 + psi.e2) |
+		// |-1  0  0  1 |       |(-1)*( psi.e0 - psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_dim(plus.e0, plus.e3);
 		phi = su3matrix_dagger_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1667,6 +1756,14 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e2 = su3vec_acc(out_tmp.e2, psi);
 	} else if(dir == ZDIR) {
+		///////////////////////////////////
+		// Calculate (1 + gamma_3) y
+		// with 1 + gamma_3:
+		// | 1  0 -i  0 |       |       psi.e0 - i*psi.e2  |
+		// | 0  1  0  i | psi = |       psi.e1 + i*psi.e3  |
+		// | i  0  1  0 |       | (-i)*(psi.e0 - i*psi.e2) |
+		// | 0 -i  0  1 |       |   i *(psi.e1 + i*psi.e3) |
+		///////////////////////////////////
 		psi = su3vec_dim_i(plus.e0, plus.e2);
 		phi = su3matrix_dagger_times_su3vec(U, psi);
 		psi = su3vec_times_complex(phi, bc_tmp);
@@ -1679,6 +1776,14 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 		out_tmp.e1 = su3vec_acc(out_tmp.e1, psi);
 		out_tmp.e3 = su3vec_dim_i(out_tmp.e3, psi);
 	} else { // TDIR
+		///////////////////////////////////
+		// Calculate psi/phi = (1 + gamma_0) y
+		// with 1 + gamma_0:
+		// | 1  0 -1  0 |       | psi.e0 - psi.e2 |
+		// | 0  1  0 -1 | psi = | psi.e1 - psi.e3 |
+		// |-1  0  1  0 |       | psi.e1 - psi.e2 |
+		// | 0 -1  0  1 |       | psi.e0 - psi.e3 |
+		///////////////////////////////////
 		psi = su3vec_dim(plus.e0, plus.e2);
 		// phi = U*psi
 		phi = su3matrix_dagger_times_su3vec(U, psi);
@@ -1696,10 +1801,10 @@ spinor dslash_eoprec_unified_local(__global const hmc_complex * const restrict i
 
 	return out_tmp;
 }
+
 //
 // Kernels
 //
-
 
 __kernel void dslash_eoprec_1dir(__global const hmc_complex * const restrict in, __global hmc_complex * const restrict out, __global const hmc_complex * const restrict field, const int evenodd)
 {
